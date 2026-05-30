@@ -123,7 +123,11 @@ html {
   color: var(--tk-dark-green);
   opacity: 0;
   transition: opacity 0.7s var(--tk-ease);
-  overflow-x: hidden;
+  /* `clip` (not `hidden`) prevents horizontal overflow WITHOUT making
+     this a scroll container. `overflow-x: hidden` forces overflow-y to
+     `auto`, which breaks `position: sticky` for every descendant — the
+     hero overlay and the benefits caption bar both depend on sticky. */
+  overflow-x: clip;
   /* Background MUST be transparent so the fixed video shows through. */
   background: transparent;
 }
@@ -313,7 +317,7 @@ html {
    Content is sticky-bottom so it stays visible the entire time. */
 .tk-hero {
   position: relative;
-  height: 280vh;
+  height: 230vh;
   background: transparent;
 }
 
@@ -413,13 +417,50 @@ html {
   padding: 1.125rem 2.25rem;
   font-size: 0.75rem;
 }
-.tk-hero-scroll-hint {
+
+/* The headline block starts at opacity 0 (set inline) and is faded in
+   via direct style writes from JS. This transition just smooths the
+   per-frame opacity/transform updates so the reveal feels fluid. */
+.tk-hero-content {
+  transition: opacity 0.25s linear, transform 0.25s var(--tk-ease);
+  will-change: opacity, transform;
+}
+
+/* Scroll prompt — centered low on the first screen while the cinematic
+   plays alone, fades out as the headline fades in. */
+.tk-hero-prompt {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: clamp(2rem, 5vh, 3.5rem);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  pointer-events: none;
+}
+.tk-hero-prompt-label {
   font-family: var(--tk-font-mono);
   font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: 0.2em;
+  font-weight: 600;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 248, 240, 0.7);
+}
+.tk-hero-prompt-line {
+  width: 1px;
+  height: 40px;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 248, 240, 0.7),
+    rgba(255, 248, 240, 0)
+  );
+  animation: tk-prompt-pulse 2.2s var(--tk-ease) infinite;
+}
+@keyframes tk-prompt-pulse {
+  0%, 100% { opacity: 0.5; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(5px); }
 }
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -524,57 +565,96 @@ html {
 }
 
 /* ────────────────────────────────────────────────────────────────────── */
-/*  FULLSCREEN FEATURES — TRANSPARENT panels, bottom caption bar          */
+/*  BENEFITS — ONE sticky section, video continuous, captions cross-fade  */
 /* ────────────────────────────────────────────────────────────────────── */
+/* Height = scroll budget for all three benefits back-to-back. The video
+   plays continuously behind this whole section (it's transparent). One
+   caption bar is pinned to the bottom and the three benefits cross-fade
+   through it. */
 .tk-features {
   position: relative;
+  height: 340vh;
   background: transparent;
 }
-.tk-feature-panel {
-  position: relative;
-  height: 140vh;
-  background: transparent;
-}
-.tk-feature-sticky {
+.tk-features-sticky {
   position: sticky;
   top: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: transparent;
-}
-
-/* Transparent slot — the fixed video shows through here. */
-.tk-feature-image-slot {
-  position: relative;
-  flex-grow: 1;
+  justify-content: flex-end;
   background: transparent;
   overflow: hidden;
 }
-.tk-feature-vignette {
+
+/* Gradient over the lower half so the caption bar feels anchored to the
+   cinematic without hiding it. */
+.tk-features-vignette {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     to bottom,
-    rgba(5, 36, 36, 0) 50%,
-    rgba(5, 36, 36, 0.65) 100%
+    rgba(5, 36, 36, 0) 45%,
+    rgba(5, 36, 36, 0.55) 78%,
+    rgba(5, 36, 36, 0.85) 100%
   );
   pointer-events: none;
 }
 
-/* Dark-green bottom caption bar. */
-.tk-feature-bottom {
+/* Persistent caption bar at the bottom. Captions are absolutely stacked
+   inside and cross-fade; the bar height is fixed so nothing jumps. */
+.tk-features-bar {
   position: relative;
+  z-index: 2;
   background: var(--tk-dark-green);
   color: var(--tk-white);
   padding: clamp(2rem, 4vh, 3.375rem) clamp(1.25rem, 4vw, 4.375rem);
+  min-height: clamp(13rem, 26vh, 18rem);
+  display: grid;
+}
+
+/* Each benefit occupies the same grid cell; only the active one is
+   visible. Cross-fade + slight lift for a clean, readable transition. */
+.tk-feature-caption {
+  grid-area: 1 / 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: clamp(1.5rem, 3vw, 3.5rem);
   align-items: end;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.45s var(--tk-ease), transform 0.45s var(--tk-ease);
+  will-change: opacity, transform;
+}
+.tk-feature-caption.is-active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 @media (max-width: 1023px) {
-  .tk-feature-bottom { grid-template-columns: 1fr; gap: 1.5rem; }
+  .tk-feature-caption { grid-template-columns: 1fr; gap: 1rem; }
+}
+
+/* Progress dots, top-right of the sticky viewport. */
+.tk-features-dots {
+  position: absolute;
+  top: clamp(5.5rem, 12vh, 7.5rem);
+  right: clamp(1.25rem, 4vw, 4.375rem);
+  z-index: 3;
+  display: flex;
+  gap: 0.5rem;
+}
+.tk-features-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transition: background 0.3s var(--tk-ease), transform 0.3s var(--tk-ease);
+}
+.tk-features-dot.is-active {
+  background: var(--tk-lime);
+  transform: scale(1.25);
 }
 
 .tk-feature-pre {
@@ -992,20 +1072,25 @@ html {
     max-width: 100%;
   }
 
-  /* Feature panels: shorter, sticky fills the visible viewport. */
-  .tk-feature-panel {
-    height: 118vh;
-    height: 118svh;
+  /* Benefits: shorter scroll budget, sticky fills the visible viewport. */
+  .tk-features {
+    height: 300vh;
+    height: 300svh;
   }
-  .tk-feature-sticky {
+  .tk-features-sticky {
     height: 100svh;
   }
-  .tk-feature-bottom {
-    padding: 1.75rem 1.25rem 2rem;
-    gap: 1rem;
+  .tk-features-bar {
+    padding: 1.5rem 1.25rem 1.75rem;
+    min-height: clamp(14rem, 40vh, 20rem);
   }
   .tk-feature-title {
     font-size: clamp(1.5rem, 7vw, 2rem);
+  }
+  .tk-features-dots {
+    top: auto;
+    bottom: calc(clamp(14rem, 40vh, 20rem) + 1rem);
+    right: 1.25rem;
   }
 
   /* Section intros: tighten the giant vertical padding. */

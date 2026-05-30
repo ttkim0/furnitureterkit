@@ -86,9 +86,7 @@ export function TerkitLandingPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
-  const panel1Ref = useRef<HTMLDivElement>(null);
-  const panel2Ref = useRef<HTMLDivElement>(null);
-  const panel3Ref = useRef<HTMLDivElement>(null);
+  const benefitsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -179,24 +177,22 @@ export function TerkitLandingPage() {
 
     function compute() {
       if (!v) return;
-      const vh = window.innerHeight;
-      const sections = [
-        heroRef.current,
-        panel1Ref.current,
-        panel2Ref.current,
-        panel3Ref.current,
-      ];
-      let totalDist = 0;
-      let traveled = 0;
-      for (const el of sections) {
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        const dist = Math.max(0, rect.height - vh);
-        totalDist += dist;
-        const passed = Math.max(0, Math.min(dist, -rect.top));
-        traveled += passed;
-      }
-      const p = totalDist > 0 ? traveled / totalDist : 0;
+      const heroEl = heroRef.current;
+      const benEl = benefitsRef.current;
+      if (!heroEl || !benEl) return;
+      // Map the video to ONE continuous scroll range: from the very top
+      // of the hero down to the bottom of the benefits section. Because
+      // the hero and benefits are adjacent (no white section between
+      // them), the video advances smoothly the whole way — it never
+      // freezes and restarts at an intersection. After the benefits end
+      // it simply holds on the last frame (hidden under the white
+      // sections anyway).
+      const y = window.scrollY || window.pageYOffset;
+      const heroTop = heroEl.getBoundingClientRect().top + y;
+      const benRect = benEl.getBoundingClientRect();
+      const benBottom = benRect.top + y + benRect.height - window.innerHeight;
+      const range = Math.max(1, benBottom - heroTop);
+      const p = Math.max(0, Math.min(1, (y - heroTop) / range));
       if (v.duration > 0 && Number.isFinite(v.duration)) {
         targetTime.current = p * v.duration;
       }
@@ -289,7 +285,12 @@ export function TerkitLandingPage() {
       <Header onWaitlistClick={scrollToWaitlist} />
 
       <main className={`tk-page ${loadingDone ? "is-revealed" : ""}`} id="top">
+        {/* Hero and Benefits are adjacent and both transparent so the
+            background video plays continuously and smoothly across the
+            two — no white section interrupts it. */}
         <Hero sectionRef={heroRef} onWaitlistClick={scrollToWaitlist} />
+
+        <Benefits sectionRef={benefitsRef} />
 
         <NotchSeparator />
 
@@ -299,26 +300,6 @@ export function TerkitLandingPage() {
             <>
               Imagine your idea as a finished product —{" "}
               <strong>designed, made, and shipped</strong> while you sleep.
-            </>
-          }
-        />
-
-        <NotchSeparator flipped />
-
-        <FullscreenFeatures
-          panel1Ref={panel1Ref}
-          panel2Ref={panel2Ref}
-          panel3Ref={panel3Ref}
-        />
-
-        <NotchSeparator />
-
-        <SectionIntro
-          eyebrow="Built for Makers"
-          title={
-            <>
-              Built by makers who want a new standard
-              <br /> for how products come to life
             </>
           }
         />
@@ -441,11 +422,12 @@ function Header({ onWaitlistClick }: { onWaitlistClick: () => void }) {
 
 /* ─────────────────────────── Hero ─────────────────────────── */
 //
-// Tall transparent section. The background video shows through. The
-// content (eyebrow, headline, sub, CTA) sits sticky at the bottom of
-// the viewport and stays fully visible the entire time the user is
-// scrolling through the hero — no character-by-character reveal, no
-// fade-in/out per line. Static is better than half-built motion.
+// Tall transparent section. The background video shows through. Like
+// Terminal, the page OPENS on the cinematic alone — the headline is
+// invisible at the very top and FADES IN as a whole block as you start
+// scrolling (a clean opacity fade, not a messy per-character reveal).
+// A small "Scroll" prompt is visible up top and fades out as the copy
+// fades in.
 
 function Hero({
   sectionRef,
@@ -454,12 +436,49 @@ function Hero({
   sectionRef: React.RefObject<HTMLDivElement | null>;
   onWaitlistClick: () => void;
 }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onScroll() {
+      const el = sectionRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const dist = Math.max(1, rect.height - window.innerHeight);
+      const p = Math.max(0, Math.min(1, -rect.top / dist));
+      // Copy fades IN over 4%–32% of the hero scroll, then fades back
+      // OUT over 82%–98% — so by the time the sticky overlay un-pins
+      // (at p≈1) the headline is gone and doesn't visibly slide away
+      // under the header; the cinematic just carries into the benefits.
+      // Direct DOM writes (no React re-render) keep scrolling buttery.
+      const copyIn = Math.max(0, Math.min(1, (p - 0.04) / 0.28));
+      const copyOut = Math.max(0, Math.min(1, (p - 0.82) / 0.16));
+      const copyOpacity = copyIn * (1 - copyOut);
+      if (contentRef.current) {
+        contentRef.current.style.opacity = String(copyOpacity);
+        contentRef.current.style.transform = `translateY(${(1 - copyIn) * 16}px)`;
+      }
+      if (promptRef.current) {
+        promptRef.current.style.opacity = String(Math.max(0, 1 - p * 6));
+      }
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [sectionRef]);
+
   return (
-    <section ref={sectionRef} className="tk-hero">
-      {/* Sticky overlay — visible at the bottom of the viewport the
-          entire time the user is anywhere inside the hero. */}
+    <section ref={sectionRef} className="tk-hero" id="top-hero">
+      {/* Scroll prompt — visible while the cinematic plays alone, fades
+          out as the headline fades in. */}
+      <div ref={promptRef} className="tk-hero-prompt">
+        <span className="tk-hero-prompt-label">Scroll to begin</span>
+        <span className="tk-hero-prompt-line" />
+      </div>
+
+      {/* Sticky overlay holds the headline at the bottom of the viewport. */}
       <div className="tk-hero-overlay">
-        <div className="tk-hero-content">
+        <div ref={contentRef} className="tk-hero-content" style={{ opacity: 0 }}>
           <p className="tk-hero-eyebrow">
             <span className="tk-hero-dot" />
             Idea → Product → Business
@@ -480,7 +499,6 @@ function Hero({
             >
               Join the Waitlist
             </button>
-            <span className="tk-hero-scroll-hint">Scroll ↓</span>
           </div>
         </div>
       </div>
@@ -570,69 +588,75 @@ const FEATURES = [
   },
 ];
 
-function FullscreenFeatures({
-  panel1Ref,
-  panel2Ref,
-  panel3Ref,
-}: {
-  panel1Ref: React.RefObject<HTMLDivElement | null>;
-  panel2Ref: React.RefObject<HTMLDivElement | null>;
-  panel3Ref: React.RefObject<HTMLDivElement | null>;
-}) {
-  const refs = [panel1Ref, panel2Ref, panel3Ref];
-  return (
-    <section className="tk-features" id="system">
-      {FEATURES.map((f, i) => (
-        <FeaturePanel
-          key={i}
-          {...f}
-          index={i + 1}
-          total={FEATURES.length}
-          panelRef={refs[i]}
-        />
-      ))}
-    </section>
-  );
-}
+// ONE sticky section that the video plays continuously behind. A single
+// dark-green caption bar is pinned to the bottom of the viewport, and
+// the three benefits cross-fade through it back-to-back as you scroll —
+// no gaps, no separate panels, so you read straight through 01 → 02 →
+// 03 while the cinematic keeps moving above.
 
-function FeaturePanel({
-  preTitle,
-  title,
-  body,
-  index,
-  total,
-  panelRef,
+function Benefits({
+  sectionRef,
 }: {
-  preTitle: string;
-  title: React.ReactNode;
-  body: string;
-  index: number;
-  total: number;
-  panelRef: React.RefObject<HTMLDivElement | null>;
+  sectionRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    function onScroll() {
+      const el = sectionRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const dist = Math.max(1, rect.height - window.innerHeight);
+      const p = Math.max(0, Math.min(0.9999, -rect.top / dist));
+      // Three equal thirds → benefit index 0,1,2.
+      const idx = Math.min(FEATURES.length - 1, Math.floor(p * FEATURES.length));
+      setActive((prev) => (prev === idx ? prev : idx));
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [sectionRef]);
+
   return (
-    <div ref={panelRef} className="tk-feature-panel">
-      <div className="tk-feature-sticky">
-        {/* Transparent image slot — the fixed background video shows
-            through here. The dark vignette at the bottom helps the
-            caption bar feel attached to it without hiding the video. */}
-        <div className="tk-feature-image-slot">
-          <div className="tk-feature-vignette" />
+    <section ref={sectionRef} className="tk-features" id="system">
+      <div className="tk-features-sticky">
+        {/* Transparent — the fixed background video shows through. */}
+        <div className="tk-features-vignette" />
+
+        {/* Persistent caption bar; the three benefits cross-fade inside. */}
+        <div className="tk-features-bar">
+          {FEATURES.map((f, i) => (
+            <div
+              key={i}
+              className={`tk-feature-caption ${i === active ? "is-active" : ""}`}
+              aria-hidden={i !== active}
+            >
+              <div className="tk-feature-title-block">
+                <p className="tk-feature-pre">{f.preTitle}</p>
+                <div className="tk-feature-title">{f.title}</div>
+              </div>
+              <div className="tk-feature-body">
+                <p>{f.body}</p>
+                <p className="tk-feature-progress">
+                  {String(i + 1).padStart(2, "0")} /{" "}
+                  {String(FEATURES.length).padStart(2, "0")}
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="tk-feature-bottom">
-          <div className="tk-feature-title-block">
-            <p className="tk-feature-pre">{preTitle}</p>
-            <div className="tk-feature-title">{title}</div>
-          </div>
-          <div className="tk-feature-body">
-            <p>{body}</p>
-            <p className="tk-feature-progress">
-              {String(index).padStart(2, "0")} / {String(total).padStart(2, "0")}
-            </p>
-          </div>
+
+        {/* Step dots so the reader can see progress through the three. */}
+        <div className="tk-features-dots" aria-hidden="true">
+          {FEATURES.map((_, i) => (
+            <span
+              key={i}
+              className={`tk-features-dot ${i === active ? "is-active" : ""}`}
+            />
+          ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
