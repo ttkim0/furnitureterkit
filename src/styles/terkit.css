@@ -1060,8 +1060,8 @@ html {
    units (svh) so the browser's address bar doesn't crop the content. */
 @media (max-width: 768px) {
   .tk-hero {
-    height: 175vh;
-    height: 175svh;
+    height: 205vh;
+    height: 205svh;
   }
   .tk-hero-overlay {
     height: 100svh;
