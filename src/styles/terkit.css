@@ -612,8 +612,10 @@ html {
   backdrop-filter: blur(28px) saturate(135%);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--tk-white);
-  padding: clamp(2.75rem, 6vh, 4.5rem) clamp(1.25rem, 4vw, 4.375rem);
-  min-height: clamp(16rem, 34vh, 22rem);
+  /* Kept compact so the bar occupies only the lower ~22% of the screen
+     and the furniture cinematic stays visible above it. */
+  padding: clamp(1.5rem, 3vh, 2.25rem) clamp(1.25rem, 4vw, 4.375rem);
+  min-height: clamp(8.5rem, 18vh, 11.5rem);
   display: grid;
 }
 
@@ -674,10 +676,10 @@ html {
 
 .tk-feature-title {
   font-family: var(--tk-font);
-  font-size: clamp(1.5rem, 2.1vw, 2.5rem);
+  font-size: clamp(1.35rem, 1.9vw, 2.1rem);
   font-weight: 450;
   letter-spacing: -0.02em;
-  line-height: 1.06;
+  line-height: 1.04;
   color: var(--tk-white);
 }
 .tk-feature-title strong {
@@ -690,14 +692,14 @@ html {
 .tk-feature-body p {
   margin: 0;
   font-family: var(--tk-font);
-  font-size: clamp(0.95rem, 0.95vw, 1.125rem);
+  font-size: clamp(0.9rem, 0.85vw, 1.0rem);
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--tk-light-gray);
-  max-width: 36rem;
+  max-width: 34rem;
 }
 .tk-feature-progress {
-  margin-top: 1.5rem !important;
+  margin-top: 0.875rem !important;
   font-family: var(--tk-font-mono) !important;
   font-size: 0.8125rem !important;
   font-weight: 600 !important;
@@ -1085,15 +1087,15 @@ html {
     height: 100svh;
   }
   .tk-features-bar {
-    padding: 1.75rem 1.25rem 2.25rem;
-    min-height: clamp(15rem, 42vh, 22rem);
+    padding: 1.5rem 1.25rem 1.75rem;
+    min-height: clamp(12rem, 32vh, 15rem);
   }
   .tk-feature-title {
-    font-size: clamp(1.5rem, 7vw, 2rem);
+    font-size: clamp(1.4rem, 6.5vw, 1.9rem);
   }
   .tk-features-dots {
     top: auto;
-    bottom: calc(clamp(15rem, 42vh, 22rem) + 1rem);
+    bottom: calc(clamp(12rem, 32vh, 15rem) + 0.75rem);
     right: 1.25rem;
   }
 
