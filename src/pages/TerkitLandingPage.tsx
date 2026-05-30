@@ -444,13 +444,13 @@ function Hero({
       const vh = window.innerHeight;
       const y = window.scrollY || window.pageYOffset || 0;
 
-      // Fade IN anchored to scrollY (NOT to heroHeight − innerHeight).
-      // On phones the address bar makes innerHeight jump between the
-      // small and large viewport at load, which made the old
-      // rect-based denominator briefly go negative and flash the copy
-      // to full opacity before settling. scrollY is rock-stable: at the
-      // very top (y≈0) this is guaranteed 0, so no flash.
-      const copyIn = Math.max(0, Math.min(1, (y - vh * 0.05) / (vh * 0.34)));
+      // Fade IN with a FIXED-PIXEL dead zone before it starts. The iOS
+      // address bar collapses on load and jitters the scroll offset by a
+      // fixed ~50–100px (a constant, not a fraction of the viewport).
+      // A 130px dead zone sits comfortably above that jitter, so the
+      // headline can't be nudged into view at the very top — killing the
+      // "appears then disappears" flash. It then ramps in over 200px.
+      const copyIn = Math.max(0, Math.min(1, (y - 130) / 200));
 
       // Fade OUT as the hero's bottom edge nears the viewport bottom —
       // i.e. just before the sticky overlay un-pins — so the headline
@@ -464,9 +464,7 @@ function Hero({
         contentRef.current.style.transform = `translateY(${(1 - copyIn) * 16}px)`;
       }
       if (promptRef.current) {
-        promptRef.current.style.opacity = String(
-          Math.max(0, 1 - y / (vh * 0.22))
-        );
+        promptRef.current.style.opacity = String(Math.max(0, 1 - y / 150));
       }
     }
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -487,9 +485,11 @@ function Hero({
         <span className="tk-hero-prompt-line" />
       </div>
 
-      {/* Sticky overlay holds the headline at the bottom of the viewport. */}
+      {/* Sticky overlay holds the headline at the bottom of the viewport.
+          Initial opacity:0 is set in CSS (not inline) so React never
+          re-asserts it on re-render and fights the scroll-driven value. */}
       <div className="tk-hero-overlay">
-        <div ref={contentRef} className="tk-hero-content" style={{ opacity: 0 }}>
+        <div ref={contentRef} className="tk-hero-content">
           <p className="tk-hero-eyebrow">
             <span className="tk-hero-dot" />
             Idea → Product → Business

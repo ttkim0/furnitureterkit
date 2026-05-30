@@ -418,10 +418,12 @@ html {
   font-size: 0.75rem;
 }
 
-/* The headline block starts at opacity 0 (set inline) and is faded in
-   via direct style writes from JS. This transition just smooths the
-   per-frame opacity/transform updates so the reveal feels fluid. */
+/* The headline block starts hidden (opacity 0 here in CSS, NOT inline,
+   so React never re-asserts it) and is faded in via direct style writes
+   from JS. The transition smooths the per-frame updates so the reveal
+   feels fluid and any momentary blip can't snap to full opacity. */
 .tk-hero-content {
+  opacity: 0;
   transition: opacity 0.25s linear, transform 0.25s var(--tk-ease);
   will-change: opacity, transform;
 }
@@ -1058,8 +1060,8 @@ html {
    units (svh) so the browser's address bar doesn't crop the content. */
 @media (max-width: 768px) {
   .tk-hero {
-    height: 150vh;
-    height: 150svh;
+    height: 175vh;
+    height: 175svh;
   }
   .tk-hero-overlay {
     height: 100svh;
