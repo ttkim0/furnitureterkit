@@ -587,29 +587,33 @@ html {
   overflow: hidden;
 }
 
-/* Gradient over the lower half so the caption bar feels anchored to the
-   cinematic without hiding it. */
+/* A soft gradient just to lift legibility behind the glassy bar — kept
+   light so it doesn't read as a hard dark band over the cinematic. */
 .tk-features-vignette {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     to bottom,
-    rgba(5, 36, 36, 0) 45%,
-    rgba(5, 36, 36, 0.55) 78%,
-    rgba(5, 36, 36, 0.85) 100%
+    rgba(5, 36, 36, 0) 55%,
+    rgba(5, 36, 36, 0.28) 100%
   );
   pointer-events: none;
 }
 
-/* Persistent caption bar at the bottom. Captions are absolutely stacked
-   inside and cross-fade; the bar height is fixed so nothing jumps. */
+/* Persistent caption bar at the bottom — a frosted, translucent green
+   pane (you can see the cinematic blurred through it) rather than a
+   solid block. Generous padding + min-height so the copy breathes and
+   never looks squished. Captions are stacked inside and cross-fade. */
 .tk-features-bar {
   position: relative;
   z-index: 2;
-  background: var(--tk-dark-green);
+  background: rgba(7, 42, 42, 0.42);
+  -webkit-backdrop-filter: blur(28px) saturate(135%);
+  backdrop-filter: blur(28px) saturate(135%);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--tk-white);
-  padding: clamp(2rem, 4vh, 3.375rem) clamp(1.25rem, 4vw, 4.375rem);
-  min-height: clamp(13rem, 26vh, 18rem);
+  padding: clamp(2.75rem, 6vh, 4.5rem) clamp(1.25rem, 4vw, 4.375rem);
+  min-height: clamp(16rem, 34vh, 22rem);
   display: grid;
 }
 
@@ -1081,15 +1085,15 @@ html {
     height: 100svh;
   }
   .tk-features-bar {
-    padding: 1.5rem 1.25rem 1.75rem;
-    min-height: clamp(14rem, 40vh, 20rem);
+    padding: 1.75rem 1.25rem 2.25rem;
+    min-height: clamp(15rem, 42vh, 22rem);
   }
   .tk-feature-title {
     font-size: clamp(1.5rem, 7vw, 2rem);
   }
   .tk-features-dots {
     top: auto;
-    bottom: calc(clamp(14rem, 40vh, 20rem) + 1rem);
+    bottom: calc(clamp(15rem, 42vh, 22rem) + 1rem);
     right: 1.25rem;
   }
 

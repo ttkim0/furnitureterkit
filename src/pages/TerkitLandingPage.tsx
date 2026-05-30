@@ -292,8 +292,6 @@ export function TerkitLandingPage() {
 
         <Benefits sectionRef={benefitsRef} />
 
-        <NotchSeparator />
-
         <SectionIntro
           eyebrow={null}
           title={
@@ -503,18 +501,6 @@ function Hero({
         </div>
       </div>
     </section>
-  );
-}
-
-/* ─────────────────────────── Notch Separator ─────────────────────────── */
-
-function NotchSeparator({ flipped = false }: { flipped?: boolean }) {
-  return (
-    <div className={`tk-notch ${flipped ? "is-flipped" : ""}`} aria-hidden="true">
-      <svg viewBox="0 0 100 6" preserveAspectRatio="none">
-        <path d="M0,6 L0,3 Q50,-3 100,3 L100,6 Z" fill="var(--tk-paper)" />
-      </svg>
-    </div>
   );
 }
 
