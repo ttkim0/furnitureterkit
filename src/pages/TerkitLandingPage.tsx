@@ -441,28 +441,41 @@ function Hero({
     function onScroll() {
       const el = sectionRef.current;
       if (!el) return;
+      const vh = window.innerHeight;
+      const y = window.scrollY || window.pageYOffset || 0;
+
+      // Fade IN anchored to scrollY (NOT to heroHeight − innerHeight).
+      // On phones the address bar makes innerHeight jump between the
+      // small and large viewport at load, which made the old
+      // rect-based denominator briefly go negative and flash the copy
+      // to full opacity before settling. scrollY is rock-stable: at the
+      // very top (y≈0) this is guaranteed 0, so no flash.
+      const copyIn = Math.max(0, Math.min(1, (y - vh * 0.05) / (vh * 0.34)));
+
+      // Fade OUT as the hero's bottom edge nears the viewport bottom —
+      // i.e. just before the sticky overlay un-pins — so the headline
+      // never visibly slides up under the header.
       const rect = el.getBoundingClientRect();
-      const dist = Math.max(1, rect.height - window.innerHeight);
-      const p = Math.max(0, Math.min(1, -rect.top / dist));
-      // Copy fades IN over 4%–32% of the hero scroll, then fades back
-      // OUT over 82%–98% — so by the time the sticky overlay un-pins
-      // (at p≈1) the headline is gone and doesn't visibly slide away
-      // under the header; the cinematic just carries into the benefits.
-      // Direct DOM writes (no React re-render) keep scrolling buttery.
-      const copyIn = Math.max(0, Math.min(1, (p - 0.04) / 0.28));
-      const copyOut = Math.max(0, Math.min(1, (p - 0.82) / 0.16));
+      const copyOut = Math.max(0, Math.min(1, (vh - rect.bottom + 150) / 150));
+
       const copyOpacity = copyIn * (1 - copyOut);
       if (contentRef.current) {
         contentRef.current.style.opacity = String(copyOpacity);
         contentRef.current.style.transform = `translateY(${(1 - copyIn) * 16}px)`;
       }
       if (promptRef.current) {
-        promptRef.current.style.opacity = String(Math.max(0, 1 - p * 6));
+        promptRef.current.style.opacity = String(
+          Math.max(0, 1 - y / (vh * 0.22))
+        );
       }
     }
     window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
     onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
   }, [sectionRef]);
 
   return (
