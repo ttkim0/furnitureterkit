@@ -1,0 +1,975 @@
+/* ──────────────────────────────────────────────────────────────────────
+   Terkit AI landing — Terminal Industries visual language with a
+   single shared, scroll-scrubbed background video.
+
+   Architecture:
+     • ONE <video> at the root, position: fixed, behind every section.
+     • Video-visible sections (hero, three benefit panels) are
+       transparent so the video shows through.
+     • White sections (section-intros, form, footer) have opaque
+       backgrounds that COVER the video. As the user scrolls into a
+       white section, the video stops advancing (because the script
+       only counts video-visible section scroll).
+     • When the user re-enters a video section, the cinematic
+       continues from exactly where they left off.
+     • Across the four video-visible sections together, the video
+       plays through exactly once.
+   ────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --tk-bg: #ffffff;
+  --tk-paper: #ffffff;
+  --tk-dirty-white: #f0f0f0;
+  --tk-dark-green: #052424;
+  --tk-dark-green-20: rgba(5, 36, 36, 0.2);
+  --tk-dark-green-15: rgba(5, 36, 36, 0.15);
+  --tk-dark-green-05: rgba(5, 36, 36, 0.05);
+  --tk-lime: #abff02;
+  --tk-orange: #fb6b3c;
+  --tk-gray: #454742;
+  --tk-dark-gray: #7f7f7f;
+  --tk-light-gray: #c2c2c2;
+  --tk-light-light-gray: #dddddd;
+  --tk-white: #ffffff;
+  --tk-white-40: rgba(255, 255, 255, 0.4);
+  --tk-white-30: rgba(255, 255, 255, 0.3);
+  --tk-white-20: rgba(255, 255, 255, 0.2);
+  --tk-white-15: rgba(255, 255, 255, 0.15);
+
+  --tk-font: "Inter", "Manrope", system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --tk-font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --tk-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --tk-ease-out: cubic-bezier(0, 0, 0.58, 1);
+}
+
+.tk-page,
+.tk-page *,
+.tk-loader,
+.tk-loader *,
+.tk-header,
+.tk-header *,
+.tk-footer,
+.tk-footer * {
+  box-sizing: border-box;
+  font-family: var(--tk-font);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  BACKGROUND VIDEO — fixed canvas, hidden source video                  */
+/* ────────────────────────────────────────────────────────────────────── */
+/* The background container is dark green so that during initial paint
+   (before the canvas has been drawn for the first time), the page
+   reads as Terminal immediately — no white flash.                       */
+.tk-bg-video {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--tk-dark-green);
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* The source video is rendered FULL-SIZE and visible (object-fit:
+   cover), sitting at the back. Two reasons:
+     1. Browsers only decode frames for visibly-rendered videos. A 1px
+        or opacity:0 video won't decode, so drawImage() would copy
+        nothing. Full-size keeps the decoder feeding real frames.
+     2. It doubles as a fallback: if the canvas ever fails to paint,
+        the user still sees the video directly instead of black.        */
+.tk-bg-video-source {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  background: var(--tk-dark-green);
+  pointer-events: none;
+}
+
+/* The canvas sits on top of the video. It's TRANSPARENT until the first
+   frame is drawn (alpha:true context) so the video shows through
+   initially. Once drawn it's opaque and masks the video — including any
+   black flash the video element produces mid-seek, because the canvas
+   retains its last good frame. */
+.tk-bg-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+  background: transparent;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  PAGE FRAME                                                            */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-page {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  color: var(--tk-dark-green);
+  opacity: 0;
+  transition: opacity 0.7s var(--tk-ease);
+  overflow-x: hidden;
+  /* Background MUST be transparent so the fixed video shows through. */
+  background: transparent;
+}
+.tk-page.is-revealed { opacity: 1; }
+
+/* Every direct child of the page sits above the fixed video. White
+   sections paint solid; video-visible sections stay transparent. */
+.tk-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  LOADING SCREEN                                                        */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--tk-dark-green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.6s var(--tk-ease), visibility 0.6s var(--tk-ease);
+}
+.tk-loader.is-done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.tk-loader-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  color: var(--tk-white);
+}
+.tk-loader-mark .tk-brand-glyph {
+  color: var(--tk-lime);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.55s var(--tk-ease), transform 0.55s var(--tk-ease);
+}
+.tk-loader-mark.is-in .tk-brand-glyph {
+  opacity: 1;
+  transform: scale(1);
+}
+.tk-loader-word {
+  display: inline-flex;
+  font-family: var(--tk-font);
+  font-size: 2.5rem;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+.tk-loader-letter {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: tk-letter-in 0.5s var(--tk-ease) forwards;
+}
+@keyframes tk-letter-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  HEADER — fixed pill                                                   */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-header {
+  position: fixed;
+  inset: 1.5625rem 0 auto;
+  z-index: 50;
+  padding: 0 clamp(1.25rem, 3.65vw, 5.83rem);
+  pointer-events: none;
+}
+@media (min-width: 1024px) {
+  .tk-header { inset: 2.875rem 0 auto; }
+}
+.tk-header-inner {
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.125rem 1.5rem;
+  pointer-events: auto;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.tk-header-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--tk-white);
+  font-family: var(--tk-font);
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  transition: color 0.3s var(--tk-ease-out);
+}
+.tk-header-brand:hover { color: var(--tk-lime); }
+.tk-header-brand .tk-brand-glyph { color: var(--tk-lime); }
+
+.tk-header-nav {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+}
+.tk-header-nav a {
+  position: relative;
+  padding: 1em 0;
+  color: var(--tk-white);
+  font-size: 0.875rem;
+  font-weight: 450;
+  letter-spacing: 0.0263em;
+  text-decoration: none;
+  transition: color 0.3s var(--tk-ease-out);
+}
+.tk-header-nav a:hover { color: var(--tk-lime); }
+@media (max-width: 1023px) { .tk-header-nav { display: none; } }
+
+.tk-header-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+@media (max-width: 1023px) {
+  .tk-header-actions .tk-cta-secondary { display: none; }
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  CTAs                                                                  */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--tk-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.75rem 2rem;
+  cursor: pointer;
+  transition: background-color 0.3s var(--tk-ease-out),
+    color 0.3s var(--tk-ease-out), transform 0.3s var(--tk-ease-out);
+}
+.tk-cta-primary {
+  background: var(--tk-lime);
+  color: var(--tk-dark-green);
+}
+.tk-cta-primary:hover { background: var(--tk-white); }
+.tk-cta-secondary {
+  background: var(--tk-white);
+  color: var(--tk-dark-green);
+}
+.tk-cta-secondary:hover { background: var(--tk-lime); }
+.tk-cta:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  LABELS                                                                */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-label {
+  font-family: var(--tk-font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.14625rem;
+  line-height: 0.81;
+  text-transform: uppercase;
+  color: var(--tk-light-gray);
+  margin: 0 0 2rem;
+}
+.tk-label-on-dark { color: var(--tk-white); }
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  HERO — transparent, lets the bg video show through                    */
+/* ────────────────────────────────────────────────────────────────────── */
+/* The hero is tall so the user has scroll budget for the video to
+   advance through its first ~30% while still seeing the headline.
+   Content is sticky-bottom so it stays visible the entire time. */
+.tk-hero {
+  position: relative;
+  height: 280vh;
+  background: transparent;
+}
+
+/* Sticky overlay pinned to the viewport. Holds the scrim + content. */
+.tk-hero-overlay {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* Soft bottom scrim baked into the overlay itself — keeps text
+     readable on bright video frames without covering the top half. */
+  background: linear-gradient(
+    to top,
+    rgba(5, 36, 36, 0.72) 0%,
+    rgba(5, 36, 36, 0.3) 40%,
+    rgba(5, 36, 36, 0) 75%
+  );
+}
+
+.tk-hero-content {
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 clamp(1.5rem, 4vw, 4.375rem) clamp(3rem, 10vh, 8rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  color: var(--tk-white);
+}
+
+.tk-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin: 0;
+  font-family: var(--tk-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+.tk-hero-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tk-lime);
+  box-shadow: 0 0 0 4px rgba(171, 255, 2, 0.25);
+}
+
+.tk-hero-title {
+  margin: 0;
+  font-family: var(--tk-font);
+  font-weight: 400;
+  font-size: clamp(2.6rem, 6vw, 7.5rem);
+  letter-spacing: -0.03em;
+  line-height: 0.98;
+  color: var(--tk-white);
+  text-wrap: balance;
+  max-width: 18ch;
+}
+.tk-hero-title u {
+  text-decoration: none;
+  position: relative;
+}
+.tk-hero-title u::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.08em;
+  height: 0.08em;
+  background: var(--tk-lime);
+}
+
+.tk-hero-sub {
+  margin: 0;
+  max-width: 38rem;
+  font-family: var(--tk-font);
+  font-size: clamp(1rem, 1.25vw, 1.25rem);
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.tk-hero-cta {
+  margin-top: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.tk-cta-lg {
+  padding: 1.125rem 2.25rem;
+  font-size: 0.75rem;
+}
+.tk-hero-scroll-hint {
+  font-family: var(--tk-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  NOTCH SEPARATOR — thin curve between dark + white                     */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-notch {
+  position: relative;
+  width: 100%;
+  height: 48px;
+  margin-top: -48px;
+  margin-bottom: -1px;
+  background: transparent;
+  pointer-events: none;
+}
+.tk-notch svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.tk-notch.is-flipped {
+  transform: scaleY(-1);
+  margin-top: -1px;
+  margin-bottom: -48px;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  SECTION INTRO — opaque white block                                    */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-section-intro {
+  background: var(--tk-white);
+  padding: clamp(6.25rem, 14vh, 11.25rem) clamp(1.25rem, 4vw, 4.375rem);
+  text-align: center;
+}
+.tk-section-intro-inner {
+  max-width: min(64.844vw, 1660px);
+  margin: 0 auto;
+}
+.tk-title-si {
+  margin: 0 auto;
+  max-width: min(64.844vw, 1660px);
+  font-family: var(--tk-font);
+  font-size: clamp(2.5rem, 4.7vw, 7.5rem);
+  font-weight: 400;
+  letter-spacing: clamp(-2.6px, -0.13vw, -1.6px);
+  line-height: 1.02;
+  color: var(--tk-dark-green);
+  text-wrap: balance;
+}
+.tk-title-si strong {
+  color: var(--tk-light-light-gray);
+  font-weight: inherit;
+}
+.tk-title-si u,
+.tk-feature-title u {
+  text-decoration: none;
+  position: relative;
+  display: inline-block;
+}
+.tk-title-si u::after,
+.tk-feature-title u::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.06em;
+  height: 0.08em;
+  background: var(--tk-lime);
+}
+.tk-title-si u strong { color: inherit; }
+
+.tk-section-cta {
+  margin-top: clamp(2.5rem, 6vh, 5.625rem);
+}
+.tk-underlined-cta {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--tk-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12375rem;
+  text-transform: uppercase;
+  color: var(--tk-dark-green);
+  position: relative;
+  padding: 0.5rem 0;
+}
+.tk-underlined-cta::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--tk-dark-green);
+  transform: scaleX(1);
+  transform-origin: 100% 50%;
+  transition: transform 0.5s var(--tk-ease);
+}
+.tk-underlined-cta:hover::after {
+  background: var(--tk-lime);
+  transform-origin: 0 50%;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  FULLSCREEN FEATURES — TRANSPARENT panels, bottom caption bar          */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-features {
+  position: relative;
+  background: transparent;
+}
+.tk-feature-panel {
+  position: relative;
+  height: 140vh;
+  background: transparent;
+}
+.tk-feature-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+}
+
+/* Transparent slot — the fixed video shows through here. */
+.tk-feature-image-slot {
+  position: relative;
+  flex-grow: 1;
+  background: transparent;
+  overflow: hidden;
+}
+.tk-feature-vignette {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(5, 36, 36, 0) 50%,
+    rgba(5, 36, 36, 0.65) 100%
+  );
+  pointer-events: none;
+}
+
+/* Dark-green bottom caption bar. */
+.tk-feature-bottom {
+  position: relative;
+  background: var(--tk-dark-green);
+  color: var(--tk-white);
+  padding: clamp(2rem, 4vh, 3.375rem) clamp(1.25rem, 4vw, 4.375rem);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 3vw, 3.5rem);
+  align-items: end;
+}
+@media (max-width: 1023px) {
+  .tk-feature-bottom { grid-template-columns: 1fr; gap: 1.5rem; }
+}
+
+.tk-feature-pre {
+  font-family: var(--tk-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  line-height: 0.81;
+  text-transform: uppercase;
+  color: var(--tk-light-gray);
+  margin: 0 0 1rem;
+}
+
+.tk-feature-title {
+  font-family: var(--tk-font);
+  font-size: clamp(1.5rem, 2.1vw, 2.5rem);
+  font-weight: 450;
+  letter-spacing: -0.02em;
+  line-height: 1.06;
+  color: var(--tk-white);
+}
+.tk-feature-title strong {
+  color: var(--tk-light-light-gray);
+  font-weight: inherit;
+}
+.tk-feature-title u strong { color: var(--tk-white); }
+
+.tk-feature-body { color: var(--tk-light-gray); }
+.tk-feature-body p {
+  margin: 0;
+  font-family: var(--tk-font);
+  font-size: clamp(0.95rem, 0.95vw, 1.125rem);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--tk-light-gray);
+  max-width: 36rem;
+}
+.tk-feature-progress {
+  margin-top: 1.5rem !important;
+  font-family: var(--tk-font-mono) !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.14625rem !important;
+  color: var(--tk-light-gray) !important;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  WAITLIST FORM — OPAQUE white block (covers the bg video)              */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-form-section {
+  background: var(--tk-white);
+  padding: clamp(4rem, 8vh, 7.5rem) clamp(1.25rem, 4vw, 4.375rem);
+}
+.tk-form-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  background: var(--tk-dark-green);
+  color: var(--tk-white);
+  border-radius: 1.0625rem;
+  padding: clamp(2.5rem, 6vh, 5rem) clamp(1.5rem, 4vw, 4.375rem);
+  position: relative;
+  overflow: hidden;
+}
+.tk-form-title {
+  text-align: center;
+  font-family: var(--tk-font);
+  font-size: clamp(2rem, 3.3vw, 5rem);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  color: var(--tk-white);
+  margin: 0 0 clamp(2rem, 5vh, 3.5rem);
+  text-wrap: balance;
+}
+.tk-form-title strong {
+  color: var(--tk-light-light-gray);
+  font-weight: inherit;
+}
+
+.tk-form-content {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2.5rem;
+  align-items: start;
+}
+@media (min-width: 1024px) {
+  .tk-form-content {
+    grid-template-columns: 1fr 1fr;
+    gap: 4rem;
+  }
+}
+
+.tk-form-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  color: var(--tk-white);
+}
+.tk-form-info h3 {
+  margin: 0;
+  font-family: var(--tk-font);
+  font-size: clamp(1.3rem, 1.5vw, 1.75rem);
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--tk-white);
+}
+.tk-form-info p {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--tk-light-gray);
+}
+.tk-form-info-muted { color: var(--tk-dark-gray) !important; }
+.tk-form-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.5rem;
+  border-left: 3px solid var(--tk-lime);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.tk-form-list li {
+  position: relative;
+  padding-left: 1.25rem;
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  color: var(--tk-light-gray);
+}
+.tk-form-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--tk-lime);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.tk-form-card {
+  background: var(--tk-dark-green);
+  border-radius: 1.0625rem;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.05),
+    0 1.5rem 4rem rgba(0, 0, 0, 0.4);
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.tk-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+.tk-field {
+  display: flex;
+  flex-direction: column;
+}
+.tk-field label {
+  font-family: var(--tk-font);
+  font-size: 1rem;
+  font-weight: 400;
+  letter-spacing: 0.0225rem;
+  color: var(--tk-white);
+  opacity: 0.85;
+  margin-bottom: 0.5rem;
+}
+.tk-field label span { color: var(--tk-lime); margin-left: 2px; }
+.tk-field input,
+.tk-field textarea {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 0;
+  color: var(--tk-white);
+  font-family: var(--tk-font);
+  font-size: 1.0625rem;
+  line-height: 1.35;
+  padding: 0 0 0.6rem;
+  outline: none;
+  transition: border-bottom-color 0.2s var(--tk-ease);
+}
+.tk-field input::placeholder,
+.tk-field textarea::placeholder {
+  color: var(--tk-light-gray);
+  opacity: 0.7;
+}
+.tk-field input:focus,
+.tk-field textarea:focus {
+  border-bottom-color: var(--tk-lime);
+}
+.tk-field textarea {
+  resize: vertical;
+  min-height: 6rem;
+}
+
+.tk-form-submit {
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.3);
+  -webkit-backdrop-filter: blur(5.5px);
+  backdrop-filter: blur(5.5px);
+  border: 0;
+  border-radius: 0.5rem;
+  color: var(--tk-white);
+  font-family: var(--tk-font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.14625rem;
+  text-transform: uppercase;
+  padding: 1.125rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+  transition: background 0.3s var(--tk-ease-out),
+    color 0.3s var(--tk-ease-out);
+}
+.tk-form-submit:hover:not(:disabled) {
+  background: var(--tk-lime);
+  color: var(--tk-dark-green);
+}
+.tk-form-submit:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.tk-form-status {
+  margin: 0;
+  font-family: var(--tk-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.tk-form-status.is-ok { color: var(--tk-lime); }
+.tk-form-status.is-error { color: var(--tk-orange); }
+
+.tk-form-footer {
+  margin-top: clamp(2rem, 5vh, 3rem);
+  text-align: center;
+}
+.tk-form-footer p {
+  margin: 0 0 0.5rem;
+  color: var(--tk-light-gray);
+  font-size: 1.0625rem;
+}
+.tk-form-footer h3 {
+  margin: 0;
+  font-family: var(--tk-font);
+  font-size: clamp(1.5rem, 2vw, 2rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--tk-white);
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  FOOTER — OPAQUE dark-green block (covers the bg video)                */
+/* ────────────────────────────────────────────────────────────────────── */
+.tk-footer {
+  background: var(--tk-dark-green);
+  color: var(--tk-white);
+  padding: clamp(5rem, 12vh, 14.375rem) clamp(1.25rem, 4vw, 4.375rem)
+    clamp(2rem, 4vh, 3rem);
+  position: relative;
+}
+.tk-footer-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2.625rem;
+  margin: 0 auto clamp(6rem, 14vh, 15rem);
+  max-width: 1500px;
+}
+.tk-footer-title {
+  margin: 0;
+  font-family: var(--tk-font);
+  font-size: clamp(2.5rem, 4.7vw, 7.5rem);
+  font-weight: 400;
+  letter-spacing: clamp(-2.4px, -0.14vw, -3.6px);
+  line-height: 0.95;
+  color: var(--tk-white);
+  max-width: min(57.292vw, 1466px);
+}
+.tk-footer-cta {
+  background: rgba(255, 255, 255, 0.15);
+  -webkit-backdrop-filter: blur(27px);
+  backdrop-filter: blur(27px);
+  border: 0;
+  border-radius: 8px;
+  color: var(--tk-white);
+  font-family: var(--tk-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 1.5625rem 3.125rem;
+  cursor: pointer;
+  transition: background 0.3s var(--tk-ease-out),
+    color 0.3s var(--tk-ease-out);
+}
+.tk-footer-cta:hover {
+  background: var(--tk-lime);
+  color: var(--tk-dark-green);
+}
+
+.tk-footer-content {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3rem;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+@media (min-width: 1024px) {
+  .tk-footer-content {
+    grid-template-columns: 4fr 4fr 4fr;
+    gap: min(1.04vw, 26.67px);
+  }
+}
+
+.tk-footer-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.tk-footer-brand .tk-brand-glyph { color: var(--tk-lime); }
+.tk-footer-brand-word {
+  font-family: var(--tk-font);
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  color: var(--tk-white);
+}
+
+.tk-footer-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+.tk-footer-col p { margin-bottom: 1.5rem; }
+.tk-footer-col ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.tk-footer-col li a {
+  color: var(--tk-white);
+  font-family: var(--tk-font);
+  font-size: 1.25rem;
+  letter-spacing: -0.0125rem;
+  line-height: 1.46;
+  text-decoration: none;
+  transition: color 0.2s var(--tk-ease);
+}
+.tk-footer-col li a:hover { color: var(--tk-lime); }
+
+.tk-footer-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.tk-footer-contact-link {
+  color: var(--tk-white);
+  font-family: var(--tk-font);
+  font-size: 1.25rem;
+  letter-spacing: -0.0125rem;
+  line-height: 1.46;
+  text-decoration: none;
+  transition: color 0.2s var(--tk-ease);
+}
+.tk-footer-contact-link:hover { color: var(--tk-lime); }
+.tk-footer-contact-text {
+  margin: 0.75rem 0 0;
+  color: var(--tk-dark-gray);
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.tk-footer-bottom {
+  max-width: 1500px;
+  margin: clamp(4rem, 8vh, 6rem) auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--tk-white-15);
+  font-family: var(--tk-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: var(--tk-dark-gray);
+  text-align: left;
+}
+.tk-footer-bottom p { margin: 0; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .tk-title-char { transition: none !important; }
+  .tk-loader-letter { animation-duration: 0.001s !important; }
+}
+
+.tk-page ::selection {
+  background: var(--tk-lime);
+  color: var(--tk-dark-green);
+}

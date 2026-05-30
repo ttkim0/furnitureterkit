@@ -1,90 +1,51 @@
 // Terkit AI — public waitlist landing page.
 //
-// Direct adaptation of the WISA scroll-driven-video pattern. The page is
-// layered:
-//   1. Fixed full-viewport video behind everything (z-index 0)
-//   2. Fixed header on top (z-index 20) — slides out after the user scrolls
-//   3. Scrollable content sections layered above the video (z-index 10)
+// Design language is a near-direct port of Terminal Industries.
 //
-// As the user scrolls, video.currentTime is driven by scroll position
-// (the WISA seeking-guard pattern). When the footer card hits 20% of the
-// viewport from the top, the video has reached its final frame.
+// ▸ ONE shared cinematic video fixed in the background of the page.
+//   It is scrubbed by the user's scroll position — not autoplayed —
+//   so the video advances only when the user is scrolling through a
+//   "video-visible" section (hero or one of the three benefit panels).
+//   When the user scrolls through a white section, the video stops
+//   advancing (because no video-visible scroll is being consumed).
+//   When they re-enter a video section, the cinematic continues from
+//   exactly where they left off — never restarts.
 //
-// One CTA only: "Join the waitlist". The form lives in the footer card;
-// the top button anchors to it.
+// ▸ The four video-visible sections together cover the full duration
+//   of the cinematic. By the time the user reaches the end of the
+//   final benefit panel, the video has played through exactly once.
+//
+// ▸ Smoothness: cumulative scroll → target time. A requestAnimationFrame
+//   loop eases video.currentTime toward the target, skipping while a
+//   seek is in flight so we never queue up seek requests. The video
+//   was re-encoded to H.264 with a keyframe every 0.5s, which makes
+//   each seek resolve in ~10ms (instead of HEVC's ~100ms+).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { joinWaitlist } from "../lib/waitlist";
+import "../styles/terkit.css";
 
 const VIDEO_URL = "/terkit-hero.mp4";
 
 export function TerkitLandingPage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const footerRef = useRef<HTMLDivElement>(null);
-  const headerRef = useRef<HTMLElement>(null);
-  const [videoReady, setVideoReady] = useState(false);
+  const [loadingDone, setLoadingDone] = useState(false);
+  const [logoAppeared, setLogoAppeared] = useState(false);
 
-  // Waitlist form state — both email and a short idea blurb are required.
+  useEffect(() => {
+    const t1 = setTimeout(() => setLogoAppeared(true), 400);
+    const t2 = setTimeout(() => setLoadingDone(true), 2100);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, []);
+
+  // Waitlist form state
   const [email, setEmail] = useState("");
   const [idea, setIdea] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "done" | "error">("idle");
-  const [statusMsg, setStatusMsg] = useState<string>("");
+  const [statusMsg, setStatusMsg] = useState("");
 
-  // ── 1) Wait for the video to be ready before scrubbing ──────────────
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onReady = () => setVideoReady(true);
-    v.addEventListener("canplaythrough", onReady);
-    v.load();
-    return () => v.removeEventListener("canplaythrough", onReady);
-  }, []);
-
-  // ── 2) Drive video.currentTime from scroll position (WISA pattern) ─
-  useEffect(() => {
-    if (!videoReady) return;
-    const v = videoRef.current;
-    if (!v || !v.duration) return;
-
-    function onScroll() {
-      // CRITICAL: skip while the browser is still seeking — otherwise
-      // queued .currentTime assignments produce frame tearing.
-      if (!v || v.seeking || !footerRef.current) return;
-      const rect = footerRef.current.getBoundingClientRect();
-      const absoluteTop = window.scrollY + rect.top;
-      // The video reaches its final frame when the footer is still a full
-      // viewport BELOW the current scroll position. This gives the user
-      // breathing room to look at the final frame before the footer card
-      // slides up into view as they continue scrolling.
-      // Video reaches its final frame when the footer is still ~2 viewports
-      // below the current scroll position. That gives the user enough scroll
-      // runway through the "Everything" + "Reasons" sections to view + read
-      // them with the final video frame frozen behind, before the footer
-      // card slides up.
-      const stopScroll = Math.max(1, absoluteTop - window.innerHeight * 2.0);
-      const fraction = Math.max(0, Math.min(1, window.scrollY / stopScroll));
-      v.currentTime = fraction * v.duration;
-
-      // Header slides up + fades as the user moves past the hero.
-      if (headerRef.current) {
-        const y = Math.min(150, Math.max(0, window.scrollY - 400) * 0.6);
-        const op = Math.max(0, 1 - Math.max(0, window.scrollY - 600) / 200);
-        headerRef.current.style.transform = `translate(-50%, -${y}px)`;
-        headerRef.current.style.opacity = String(op);
-      }
-    }
-
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [videoReady]);
-
-  // ── Scroll the page to the waitlist form ────────────────────────────
-  const scrollToWaitlist = useCallback(() => {
-    footerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
-
-  // ── Submit handler ──────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !idea.trim()) return;
@@ -106,301 +67,735 @@ export function TerkitLandingPage() {
     setIdea("");
   }
 
+  const formRef = useRef<HTMLDivElement>(null);
+  const scrollToWaitlist = useCallback(() => {
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  // ── Shared video → canvas, scroll-driven scrub ─────────────────────
+  // We draw the video frames onto a <canvas> rather than displaying the
+  // <video> element directly. Reason: paused HTML5 videos can be wiped
+  // by the browser at any moment (Chrome + Safari both do this — the
+  // displayed frame briefly flashes black during seeks and stays black
+  // when paused). The canvas holds the LAST successfully drawn frame
+  // forever, so the user always sees a continuous image.
+  //
+  // The video stays in the DOM (underneath the canvas) so the browser
+  // keeps its decoder warm. We don't rely on it being visible — the
+  // canvas does all the visible work.
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const panel1Ref = useRef<HTMLDivElement>(null);
+  const panel2Ref = useRef<HTMLDivElement>(null);
+  const panel3Ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    if (!v || !c) return;
+    // alpha: true so that BEFORE the first frame is painted, the canvas
+    // is transparent (the visible <video> + dark-green container show
+    // through) instead of opaque black.
+    const ctx = c.getContext("2d", { alpha: true });
+    if (!ctx) return;
+
+    const targetTime = { current: 0 };
+    let lastDrawnTime = -1;
+
+    function sizeCanvas() {
+      if (!c) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      c.width = Math.max(1, Math.floor(window.innerWidth * dpr));
+      c.height = Math.max(1, Math.floor(window.innerHeight * dpr));
+      // Redraw at new size so the canvas doesn't go blank on resize.
+      drawCover();
+    }
+
+    // Draw the video's current frame onto the canvas with object-fit:
+    // cover semantics so the 4K source fills the viewport without
+    // distortion. Called on every seeked event AND defensively on
+    // every rAF tick if the time has changed.
+    function drawCover() {
+      if (!v || !c || !ctx) return;
+      if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+      const vw = v.videoWidth;
+      const vh = v.videoHeight;
+      const cw = c.width;
+      const ch = c.height;
+      const vAspect = vw / vh;
+      const cAspect = cw / ch;
+      let sx = 0;
+      let sy = 0;
+      let sw = vw;
+      let sh = vh;
+      if (vAspect > cAspect) {
+        sw = vh * cAspect;
+        sx = (vw - sw) / 2;
+      } else {
+        sh = vw / cAspect;
+        sy = (vh - sh) / 2;
+      }
+      try {
+        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, cw, ch);
+        lastDrawnTime = v.currentTime;
+      } catch {
+        // drawImage can throw if the video frame isn't decoded yet —
+        // just skip; we'll catch it on the next tick.
+      }
+    }
+
+    function compute() {
+      if (!v) return;
+      const vh = window.innerHeight;
+      const sections = [
+        heroRef.current,
+        panel1Ref.current,
+        panel2Ref.current,
+        panel3Ref.current,
+      ];
+      let totalDist = 0;
+      let traveled = 0;
+      for (const el of sections) {
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        const dist = Math.max(0, rect.height - vh);
+        totalDist += dist;
+        const passed = Math.max(0, Math.min(dist, -rect.top));
+        traveled += passed;
+      }
+      const p = totalDist > 0 ? traveled / totalDist : 0;
+      if (v.duration > 0 && Number.isFinite(v.duration)) {
+        targetTime.current = p * v.duration;
+      }
+    }
+
+    let raf: number | null = null;
+    function tick() {
+      if (v && v.duration > 0 && !v.seeking) {
+        const delta = targetTime.current - v.currentTime;
+        // Tolerance band: only seek when the difference is meaningful.
+        // 0.04s ≈ 1 frame at 24fps. Smaller deltas would just trigger
+        // pointless seeks that introduce visible stutter.
+        if (Math.abs(delta) > 0.04) {
+          v.currentTime = targetTime.current;
+        }
+      }
+      // If the video advanced since the last draw, refresh the canvas.
+      if (v && Math.abs(v.currentTime - lastDrawnTime) > 0.001) {
+        drawCover();
+      }
+      raf = requestAnimationFrame(tick);
+    }
+
+    function onSeeked() { drawCover(); }
+    function onLoadedData() {
+      // First decoded frame is now in the video — draw it to the canvas
+      // immediately so we never show empty/black.
+      drawCover();
+    }
+
+    // requestVideoFrameCallback fires once per actually-rendered video
+    // frame — the most reliable signal that a fresh frame is available
+    // to draw. We use it (when supported) to capture frames during the
+    // brief warm-up play, then hand off to the scrub loop.
+    type RVFCVideo = HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+    };
+    function onCanPlay() {
+      const rv = v as RVFCVideo;
+      // Kickstart: play briefly so the decoder produces real frames.
+      v!.play().then(() => {
+        if (rv.requestVideoFrameCallback) {
+          // Draw the first rendered frame, then stop playback and scrub.
+          rv.requestVideoFrameCallback(() => {
+            drawCover();
+            v!.pause();
+          });
+        } else {
+          // Fallback: draw a couple of frames over ~120ms, then pause.
+          drawCover();
+          setTimeout(() => { drawCover(); v!.pause(); }, 120);
+        }
+      }).catch(() => {
+        // Autoplay rejected — nudge currentTime to force a seek+decode.
+        if (v) v.currentTime = 0.001;
+      });
+    }
+
+    v.addEventListener("loadeddata", onLoadedData);
+    v.addEventListener("seeked", onSeeked);
+    v.addEventListener("canplay", onCanPlay, { once: true });
+    // If video was already past these states before we attached, run them now.
+    if (v.readyState >= 2) onLoadedData();
+    if (v.readyState >= 3) onCanPlay();
+
+    window.addEventListener("scroll", compute, { passive: true });
+    window.addEventListener("resize", sizeCanvas);
+    sizeCanvas();
+    compute();
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      v.removeEventListener("loadeddata", onLoadedData);
+      v.removeEventListener("seeked", onSeeked);
+      v.removeEventListener("canplay", onCanPlay);
+      window.removeEventListener("scroll", compute);
+      window.removeEventListener("resize", sizeCanvas);
+      if (raf !== null) cancelAnimationFrame(raf);
+    };
+  }, []);
+
   return (
-    <main className="tk-page">
-      {/* ─────────── Loading screen ─────────── */}
-      {!videoReady && (
-        <div className="tk-loading">
-          <span className="tk-loading-label">LOADING</span>
-          <div className="tk-loading-bar">
-            <div className="tk-loading-fill" />
-          </div>
-        </div>
-      )}
+    <>
+      <LoadingScreen done={loadingDone} appeared={logoAppeared} />
 
-      {/* ─────────── Fixed video background (z 0) ─────────── */}
-      <div className="tk-video-wrap">
-        <video
-          ref={videoRef}
-          src={VIDEO_URL}
-          muted
-          playsInline
-          preload="auto"
-          className="tk-video"
+      {/* ONE fixed canvas (with hidden source video) that everything
+          else floats above. */}
+      <BackgroundVideo videoRef={videoRef} canvasRef={canvasRef} />
+
+      <Header onWaitlistClick={scrollToWaitlist} />
+
+      <main className={`tk-page ${loadingDone ? "is-revealed" : ""}`} id="top">
+        <Hero sectionRef={heroRef} onWaitlistClick={scrollToWaitlist} />
+
+        <NotchSeparator />
+
+        <SectionIntro
+          eyebrow={null}
+          title={
+            <>
+              Imagine your idea as a finished product —{" "}
+              <strong>designed, made, and shipped</strong> while you sleep.
+            </>
+          }
         />
-        <div className="tk-video-grad" />
-      </div>
 
-      {/* ─────────── Fixed header (z 20) ─────────── */}
-      <header ref={headerRef} className="tk-header">
-        <a href="#top" className="tk-wordmark" aria-label="Terkit AI home">
-          <svg viewBox="0 0 90 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-            {/* Simple geometric TERKIT AI wordmark — five paths */}
-            <text
-              x="0"
-              y="14"
-              fontFamily="Manrope, sans-serif"
-              fontWeight="700"
-              fontSize="15"
-              letterSpacing="0.04em"
-              fill="white"
+        <NotchSeparator flipped />
+
+        <FullscreenFeatures
+          panel1Ref={panel1Ref}
+          panel2Ref={panel2Ref}
+          panel3Ref={panel3Ref}
+        />
+
+        <NotchSeparator />
+
+        <SectionIntro
+          eyebrow="Built for Makers"
+          title={
+            <>
+              Built by makers who want a new standard
+              <br /> for how products come to life
+            </>
+          }
+        />
+
+        <SectionIntro
+          eyebrow="How It Works"
+          title={
+            <>
+              Revolutionary technology that turns a sketch into a{" "}
+              <strong>real business</strong>
+            </>
+          }
+          cta={{ label: "Take a closer look", onClick: scrollToWaitlist }}
+        />
+
+        <WaitlistForm
+          formRef={formRef}
+          email={email}
+          idea={idea}
+          status={status}
+          statusMsg={statusMsg}
+          onEmailChange={setEmail}
+          onIdeaChange={setIdea}
+          onSubmit={handleSubmit}
+        />
+
+        <Footer onWaitlistClick={scrollToWaitlist} />
+      </main>
+    </>
+  );
+}
+
+/* ─────────────────────────── BackgroundVideo ─────────────────────────── */
+//
+// Single <video> tag, position: fixed across the viewport, behind every
+// section. White sections cover it; transparent sections (hero, feature
+// panels) reveal it. preload="auto" + no autoplay/loop — we drive
+// currentTime ourselves so each user gets the cinematic to play through
+// exactly once across the entire scroll of the page.
+
+function BackgroundVideo({
+  videoRef,
+  canvasRef,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+}) {
+  return (
+    <div className="tk-bg-video" aria-hidden="true">
+      {/* Hidden source video — stays mounted so the browser's decoder
+          stays warm. We never display it directly; we paint its frames
+          onto the canvas above. */}
+      <video
+        ref={videoRef}
+        src={VIDEO_URL}
+        muted
+        playsInline
+        preload="auto"
+        disablePictureInPicture
+        className="tk-bg-video-source"
+      />
+      <canvas ref={canvasRef} className="tk-bg-canvas" />
+    </div>
+  );
+}
+
+/* ─────────────────────────── Loading screen ─────────────────────────── */
+
+function LoadingScreen({ done, appeared }: { done: boolean; appeared: boolean }) {
+  return (
+    <div className={`tk-loader ${done ? "is-done" : ""}`}>
+      <div className={`tk-loader-mark ${appeared ? "is-in" : ""}`}>
+        <BrandGlyph size={64} />
+        <span className="tk-loader-word" aria-label="Terkit">
+          {"TERKIT".split("").map((c, i) => (
+            <span
+              key={i}
+              className="tk-loader-letter"
+              style={{ animationDelay: `${i * 70 + 350}ms` }}
             >
-              TERKIT
-            </text>
-            <text
-              x="60"
-              y="14"
-              fontFamily="JetBrains Mono, monospace"
-              fontWeight="500"
-              fontSize="11"
-              letterSpacing="0.06em"
-              fill="rgba(255,255,255,0.65)"
-            >
-              AI
-            </text>
-          </svg>
+              {c}
+            </span>
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────── Header ─────────────────────────── */
+
+function Header({ onWaitlistClick }: { onWaitlistClick: () => void }) {
+  return (
+    <header className="tk-header">
+      <div className="tk-header-inner">
+        <a href="#top" className="tk-header-brand" aria-label="Terkit home">
+          <BrandGlyph size={24} />
+          <span className="tk-header-brand-word">Terkit</span>
         </a>
 
-        <button onClick={scrollToWaitlist} className="tk-cta-pill">
-          <span>Join the waitlist</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 12h14M13 5l7 7-7 7" />
-          </svg>
-        </button>
-      </header>
+        <nav className="tk-header-nav">
+          <a href="#system">System</a>
+          <a href="#makers">Makers</a>
+          <a href="#waitlist">Waitlist</a>
+          <a href="#about">About</a>
+        </nav>
 
-      {/* ─────────── Scrollable content (z 10) ─────────── */}
-      <div className="tk-scroll" id="top">
-        {/* HERO */}
-        <section className="tk-hero">
-          <div className="tk-hero-bottom">
-            <h1 className="tk-headline">
-              Turn your idea
-              <br />
-              into a real
-              <br />
-              business.
-            </h1>
+        <div className="tk-header-actions">
+          <button className="tk-cta tk-cta-secondary" onClick={onWaitlistClick}>
+            Demo
+          </button>
+          <button className="tk-cta tk-cta-primary" onClick={onWaitlistClick}>
+            Join Waitlist
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/* ─────────────────────────── Hero ─────────────────────────── */
+//
+// Tall transparent section. The background video shows through. The
+// content (eyebrow, headline, sub, CTA) sits sticky at the bottom of
+// the viewport and stays fully visible the entire time the user is
+// scrolling through the hero — no character-by-character reveal, no
+// fade-in/out per line. Static is better than half-built motion.
+
+function Hero({
+  sectionRef,
+  onWaitlistClick,
+}: {
+  sectionRef: React.RefObject<HTMLDivElement | null>;
+  onWaitlistClick: () => void;
+}) {
+  return (
+    <section ref={sectionRef} className="tk-hero">
+      {/* Sticky overlay — visible at the bottom of the viewport the
+          entire time the user is anywhere inside the hero. */}
+      <div className="tk-hero-overlay">
+        <div className="tk-hero-content">
+          <p className="tk-hero-eyebrow">
+            <span className="tk-hero-dot" />
+            Idea → Product → Business
+          </p>
+          <h1 className="tk-hero-title">
+            Make what you imagine.
+            <br />
+            Sell it <u>tomorrow</u>.
+          </h1>
+          <p className="tk-hero-sub">
+            AI-native technology that turns a sentence into a real product —
+            designed, manufactured, and shipped while you build the next idea.
+          </p>
+          <div className="tk-hero-cta">
+            <button
+              className="tk-cta tk-cta-primary tk-cta-lg"
+              onClick={onWaitlistClick}
+            >
+              Join the Waitlist
+            </button>
+            <span className="tk-hero-scroll-hint">Scroll ↓</span>
           </div>
-          <div className="tk-hero-aside">
-            <p>
-              You bring the idea. We design the product, make it, ship it, and run the store.{" "}
-              <strong>The easiest way to start selling something you imagined.</strong>
-            </p>
-            <button onClick={scrollToWaitlist} className="tk-cta-double">
-              <span className="tk-cta-text">JOIN THE WAITLIST</span>
-              <span className="tk-cta-arrow">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 12h14M13 5l7 7-7 7" />
-                </svg>
-              </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────── Notch Separator ─────────────────────────── */
+
+function NotchSeparator({ flipped = false }: { flipped?: boolean }) {
+  return (
+    <div className={`tk-notch ${flipped ? "is-flipped" : ""}`} aria-hidden="true">
+      <svg viewBox="0 0 100 6" preserveAspectRatio="none">
+        <path d="M0,6 L0,3 Q50,-3 100,3 L100,6 Z" fill="var(--tk-paper)" />
+      </svg>
+    </div>
+  );
+}
+
+/* ─────────────────────────── Section Intro ─────────────────────────── */
+
+function SectionIntro({
+  eyebrow,
+  title,
+  cta,
+}: {
+  eyebrow: string | null;
+  title: React.ReactNode;
+  cta?: { label: string; onClick: () => void };
+}) {
+  return (
+    <section className="tk-section-intro">
+      <div className="tk-section-intro-inner">
+        {eyebrow && <p className="tk-label">{eyebrow}</p>}
+        <h2 className="tk-title-si">{title}</h2>
+        {cta && (
+          <div className="tk-section-cta">
+            <button className="tk-underlined-cta" onClick={cta.onClick}>
+              {cta.label}
             </button>
           </div>
-        </section>
+        )}
+      </div>
+    </section>
+  );
+}
 
-        {/* SPACER (lets the video advance between sections) */}
-        <div className="tk-spacer" />
+/* ─────────────────────────── Fullscreen Features ─────────────────────────── */
+//
+// Three stacked panels. They are TRANSPARENT — the fixed background
+// video shows through. Each panel has a dark-green caption bar at the
+// bottom of its sticky viewport with the benefit's title + body.
 
-        {/* MIDDLE — scroll-reveal copy + 3 columns */}
-        <section className="tk-middle">
-          <p className="tk-bigprose">
-            From a sketch on a napkin to a real product in a real store with real customers.
-            We handle the design, the manufacturing, the site, the payments — everything.
-            You just have to want to start.
-          </p>
-          <div className="tk-cols">
-            <div className="tk-col">
-              <span className="tk-coltag">01 — START WITH AN IDEA</span>
-              <h3>Drawing. Prompt. Photo.</h3>
-              <p>
-                Sketch it on a napkin, type a description, or drop a photo of
-                something you wish existed. Anything works — just tell us what you want to make.
-              </p>
-            </div>
-            <div className="tk-col">
-              <span className="tk-coltag">02 — WATCH IT BECOME REAL</span>
-              <h3>We make the product.</h3>
-              <p>
-                We turn your idea into a real 3D product and team up with our manufacturer
-                partners to actually build it. You see it come to life and approve every step.
-              </p>
-            </div>
-            <div className="tk-col">
-              <span className="tk-coltag">03 — START SELLING</span>
-              <h3>We run the whole business.</h3>
-              <p>
-                We build your storefront, take payments, handle shipping, manage your
-                customers, and track your sales. Your business is ready. You just sell.
-              </p>
-            </div>
+const FEATURES = [
+  {
+    preTitle: "Benefit 01",
+    title: (
+      <>
+        A single <strong>workflow</strong> for
+        <br /> turning sketches into <u>products</u>
+      </>
+    ),
+    body:
+      "Drop in a sketch, a photo, or a one-line description. Our AI handles industrial design, CAD, BOMs, and renders — then matches you with maker partners we already trust. You approve every step.",
+  },
+  {
+    preTitle: "Benefit 02",
+    title: (
+      <>
+        <u><strong>Easy</strong></u>, scalable
+        <br /> <strong>production</strong>
+      </>
+    ),
+    body:
+      "No factory hunting. No spreadsheets. No minimums you can't meet. Terkit's network handles small runs and scale-ups alike — woodworkers, ceramicists, CNC shops, soft-goods. One contract, one quality bar.",
+  },
+  {
+    preTitle: "Benefit 03",
+    title: (
+      <>
+        <strong>Rapid</strong>, <strong>repeatable</strong>
+        <br /> <u>revenue</u>
+      </>
+    ),
+    body:
+      "We build your store, take payments, ship orders, run support, and handle returns. You bring the idea. We bring the business — and you keep the brand.",
+  },
+];
+
+function FullscreenFeatures({
+  panel1Ref,
+  panel2Ref,
+  panel3Ref,
+}: {
+  panel1Ref: React.RefObject<HTMLDivElement | null>;
+  panel2Ref: React.RefObject<HTMLDivElement | null>;
+  panel3Ref: React.RefObject<HTMLDivElement | null>;
+}) {
+  const refs = [panel1Ref, panel2Ref, panel3Ref];
+  return (
+    <section className="tk-features" id="system">
+      {FEATURES.map((f, i) => (
+        <FeaturePanel
+          key={i}
+          {...f}
+          index={i + 1}
+          total={FEATURES.length}
+          panelRef={refs[i]}
+        />
+      ))}
+    </section>
+  );
+}
+
+function FeaturePanel({
+  preTitle,
+  title,
+  body,
+  index,
+  total,
+  panelRef,
+}: {
+  preTitle: string;
+  title: React.ReactNode;
+  body: string;
+  index: number;
+  total: number;
+  panelRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div ref={panelRef} className="tk-feature-panel">
+      <div className="tk-feature-sticky">
+        {/* Transparent image slot — the fixed background video shows
+            through here. The dark vignette at the bottom helps the
+            caption bar feel attached to it without hiding the video. */}
+        <div className="tk-feature-image-slot">
+          <div className="tk-feature-vignette" />
+        </div>
+        <div className="tk-feature-bottom">
+          <div className="tk-feature-title-block">
+            <p className="tk-feature-pre">{preTitle}</p>
+            <div className="tk-feature-title">{title}</div>
           </div>
-        </section>
+          <div className="tk-feature-body">
+            <p>{body}</p>
+            <p className="tk-feature-progress">
+              {String(index).padStart(2, "0")} / {String(total).padStart(2, "0")}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-        {/* Spacer so the video can settle into its final frame BEFORE
-            the "everything" section starts overlapping. */}
-        <div className="tk-spacer" />
+/* ─────────────────────────── Waitlist Form ─────────────────────────── */
 
-        {/* EVERYTHING — what we handle, presented over the final video frame */}
-        <section className="tk-everything">
-          <div className="tk-everything-header">
-            <span className="tk-everything-eyebrow">WHAT YOU GET</span>
-            <h2 className="tk-everything-headline">
-              Everything you'd normally
-              <br />
-              need a team for.
-              <br />
-              <em>We do it.</em>
-            </h2>
-            <p className="tk-everything-sub">
-              You'd usually need a designer, a manufacturer, a developer, an accountant,
-              a marketer, and a warehouse to start selling something. Or you could just
-              tell us your idea.
+function WaitlistForm({
+  formRef,
+  email,
+  idea,
+  status,
+  statusMsg,
+  onEmailChange,
+  onIdeaChange,
+  onSubmit,
+}: {
+  formRef: React.RefObject<HTMLDivElement | null>;
+  email: string;
+  idea: string;
+  status: "idle" | "submitting" | "done" | "error";
+  statusMsg: string;
+  onEmailChange: (v: string) => void;
+  onIdeaChange: (v: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+}) {
+  return (
+    <section ref={formRef} className="tk-form-section" id="waitlist">
+      <div className="tk-form-inner">
+        <h2 className="tk-form-title">
+          <strong>Demo, waitlist, conversation —</strong>
+          <br />
+          <strong>you decide how to Terkit</strong>
+        </h2>
+
+        <div className="tk-form-content">
+          <div className="tk-form-info">
+            <h3>Drop your email and we'll get back to you, your way.</h3>
+            <p>
+              Tell us what you want to make. We'll review your idea and reach
+              out about:
+            </p>
+            <ul className="tk-form-list">
+              <li>15-minute product walkthrough</li>
+              <li>Early-access waitlist invitation</li>
+              <li>Maker-partner network introduction</li>
+            </ul>
+            <p className="tk-form-info-muted">
+              Trusted by makers across furniture, ceramics, lighting, and more.
             </p>
           </div>
 
-          <div className="tk-everything-grid">
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">01</span>
-              <strong>Design</strong>
-              <p>We turn your sketch, prompt, or photo into a real product. You approve every angle.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">02</span>
-              <strong>Manufacturing</strong>
-              <p>We match your product with a trusted maker. No factory hunting. No minimums you can't meet.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">03</span>
-              <strong>Quality</strong>
-              <p>Every batch goes through inspection before it ships. You never see a bad product reach your customer.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">04</span>
-              <strong>Shipping</strong>
-              <p>Door-to-door logistics handled. Storage, packing, tracking — all taken care of.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">05</span>
-              <strong>Storefront</strong>
-              <p>Your own beautifully-designed store, with your brand, on your domain. Built in minutes.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">06</span>
-              <strong>Payments</strong>
-              <p>Customers check out, you get paid. We handle the gateway, the fees, the chargebacks.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">07</span>
-              <strong>Marketing</strong>
-              <p>SEO, social, email, ads — set up and running from day one. We even write the copy.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">08</span>
-              <strong>Analytics</strong>
-              <p>Live dashboard of sales, visitors, where they're from, what they look at, what they buy.</p>
-            </div>
-            <div className="tk-everything-cell">
-              <span className="tk-everything-num">09</span>
-              <strong>Support</strong>
-              <p>Customer emails answered, returns processed, questions handled. You stay focused on the next idea.</p>
-            </div>
-          </div>
-
-          <div className="tk-everything-close">
-            <p>You bring the idea. We bring the business.</p>
-          </div>
-        </section>
-
-        {/* Why be early — quiet reasons strip before the form */}
-        <section className="tk-reasons">
-          <div className="tk-reasons-headline">
-            <span className="tk-everything-eyebrow">WHY GET IN EARLY</span>
-            <h3>You're early. That means a few real perks.</h3>
-          </div>
-          <div className="tk-reasons-grid">
-            <div className="tk-reason">
-              <strong>Founder pricing</strong>
-              <p>Our lowest fees, locked in for as long as you're on the platform.</p>
-            </div>
-            <div className="tk-reason">
-              <strong>Direct line to the team</strong>
-              <p>You get a real human, not a help-desk ticket. Tell us what's missing, we'll build it.</p>
-            </div>
-            <div className="tk-reason">
-              <strong>First in line</strong>
-              <p>First access to new manufacturer partners, new product categories, new tooling.</p>
-            </div>
-            <div className="tk-reason">
-              <strong>Shape the platform</strong>
-              <p>Early users vote on what we build next. Your feedback literally moves the roadmap.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* Small breathing room before the footer slides up */}
-        <div className="tk-spacer" />
-
-        {/* FOOTER — the waitlist form lives here (scroll-end anchor) */}
-        <section className="tk-foot-wrap" ref={footerRef}>
-          <div className="tk-foot-card">
-            <div className="tk-foot-top">
-              <div className="tk-foot-headline">
-                <h2>
-                  Be one
-                  <br />
-                  of the first.
-                </h2>
-                <p>
-                  We're opening early access in waves. Drop your email and we'll let
-                  you know the moment it's your turn to start building.
-                </p>
-              </div>
-
-              <form className="tk-foot-form" onSubmit={handleSubmit}>
+          <div className="tk-form-card">
+            <form onSubmit={onSubmit} className="tk-form">
+              <div className="tk-field">
+                <label htmlFor="tk-email">
+                  Email <span>*</span>
+                </label>
                 <input
+                  id="tk-email"
                   type="email"
                   required
                   autoComplete="email"
-                  placeholder="you@yourstudio.com"
+                  placeholder="name@email.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => onEmailChange(e.target.value)}
                   disabled={status === "submitting" || status === "done"}
-                  className="tk-foot-input"
                 />
-                <textarea
-                  required
-                  rows={3}
-                  maxLength={1000}
-                  placeholder="What do you want to make? (e.g. a walnut bookshelf that holds vinyl records, or a ceramic mug with a thumb rest)"
-                  value={idea}
-                  onChange={(e) => setIdea(e.target.value)}
-                  disabled={status === "submitting" || status === "done"}
-                  className="tk-foot-input tk-foot-textarea"
-                />
-                <button
-                  type="submit"
-                  className="tk-foot-submit"
-                  disabled={status === "submitting" || status === "done"}
-                >
-                  {status === "submitting" ? "Adding…" : status === "done" ? "✓ On the list" : "Join the waitlist"}
-                  {status === "idle" && (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M5 12h14M13 5l7 7-7 7" />
-                    </svg>
-                  )}
-                </button>
-                {statusMsg && (
-                  <p className={`tk-foot-msg ${status === "error" ? "is-error" : "is-ok"}`}>{statusMsg}</p>
-                )}
-              </form>
-            </div>
+              </div>
 
-            <div className="tk-foot-copyright tk-foot-copyright-solo">
-              <span>© {new Date().getFullYear()} TERKIT AI</span>
-            </div>
+              <div className="tk-field">
+                <label htmlFor="tk-idea">
+                  What do you want to make? <span>*</span>
+                </label>
+                <textarea
+                  id="tk-idea"
+                  rows={4}
+                  required
+                  maxLength={1000}
+                  placeholder="A walnut bookshelf that holds vinyl records, a ceramic mug with a thumb rest, …"
+                  value={idea}
+                  onChange={(e) => onIdeaChange(e.target.value)}
+                  disabled={status === "submitting" || status === "done"}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="tk-form-submit"
+                disabled={status === "submitting" || status === "done"}
+              >
+                {status === "submitting"
+                  ? "SUBMITTING…"
+                  : status === "done"
+                    ? "✓ ON THE LIST"
+                    : "SUBMIT"}
+              </button>
+
+              {statusMsg && (
+                <p
+                  className={`tk-form-status ${
+                    status === "error" ? "is-error" : "is-ok"
+                  }`}
+                >
+                  {statusMsg}
+                </p>
+              )}
+            </form>
           </div>
-        </section>
+        </div>
       </div>
-    </main>
+    </section>
+  );
+}
+
+/* ─────────────────────────── Footer ─────────────────────────── */
+
+function Footer({ onWaitlistClick }: { onWaitlistClick: () => void }) {
+  return (
+    <footer className="tk-footer" id="about">
+      <div className="tk-footer-header">
+        <h2 className="tk-footer-title">
+          The future of making starts today.
+        </h2>
+        <button onClick={onWaitlistClick} className="tk-footer-cta">
+          Take charge of your studio
+        </button>
+      </div>
+
+      <div className="tk-footer-content">
+        <div className="tk-footer-brand">
+          <BrandGlyph size={48} />
+          <span className="tk-footer-brand-word">Terkit</span>
+        </div>
+
+        <div className="tk-footer-links">
+          <div className="tk-footer-col">
+            <p className="tk-label tk-label-on-dark">System</p>
+            <ul>
+              <li><a href="#top">Homepage</a></li>
+              <li><a href="#system">How it works</a></li>
+              <li><a href="#waitlist">Waitlist</a></li>
+            </ul>
+          </div>
+          <div className="tk-footer-col">
+            <p className="tk-label tk-label-on-dark">Company</p>
+            <ul>
+              <li><a href="#about">About</a></li>
+              <li><a href="#waitlist">Contact</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="tk-footer-contact">
+          <p className="tk-label tk-label-on-dark">Reach us</p>
+          <a href="#waitlist" className="tk-footer-contact-link">
+            Ready to make what you imagine?
+          </a>
+          <p className="tk-footer-contact-text">We reply within a day.</p>
+        </div>
+      </div>
+
+      <div className="tk-footer-bottom">
+        <p>© {new Date().getFullYear()} Terkit — All rights reserved</p>
+      </div>
+    </footer>
+  );
+}
+
+/* ─────────────────────────── Brand Glyph ─────────────────────────── */
+
+function BrandGlyph({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      aria-hidden="true"
+      className="tk-brand-glyph"
+    >
+      <rect
+        x="2"
+        y="2"
+        width="20"
+        height="20"
+        rx="5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M7 8h10M12 8v9M12 13.5l3.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
