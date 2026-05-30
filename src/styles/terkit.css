@@ -1059,12 +1059,22 @@ html {
    sections, and switch the sticky viewport fills to small-viewport
    units (svh) so the browser's address bar doesn't crop the content. */
 @media (max-width: 768px) {
+  /* Static headline on mobile, so the hero only needs to be ~one screen
+     (no tall scroll-reveal window). */
   .tk-hero {
-    height: 205vh;
-    height: 205svh;
+    height: 110vh;
+    height: 110svh;
   }
   .tk-hero-overlay {
     height: 100svh;
+  }
+  /* Belt-and-suspenders: even if JS hasn't run yet, the headline is
+     shown on mobile so it can never get stuck hidden. */
+  .tk-hero-content {
+    opacity: 1;
+  }
+  .tk-hero-prompt {
+    display: none;
   }
   .tk-hero-content {
     padding: 0 1.25rem clamp(2.5rem, 8vh, 5rem);

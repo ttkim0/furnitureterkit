@@ -439,10 +439,27 @@ function Hero({
 
   useEffect(() => {
     const el = sectionRef.current;
-    // The sticky overlay is 100svh — a STABLE pixel height that does NOT
-    // grow when the mobile address bar collapses (unlike innerHeight).
-    // We use its height to find the real un-pin point, so the fade-out
-    // is calibrated correctly and the headline gets its full showcase.
+
+    // ── Mobile / touch: NO scroll-driven opacity ───────────────────────
+    // On phones the address bar continuously resizes the viewport and
+    // jitters the scroll offset, so ANY scroll-linked fade will flicker
+    // no matter how it's thresholded. So we don't do the reveal here:
+    // the headline simply fades in ONCE on load (via the CSS transition,
+    // from the CSS opacity:0 to 1) and then stays put — nothing reads
+    // scroll, so nothing can jitter. The scroll reveal is desktop-only.
+    const isMobile =
+      window.innerWidth <= 768 ||
+      window.matchMedia("(pointer: coarse)").matches;
+    if (isMobile) {
+      if (contentRef.current) {
+        contentRef.current.style.opacity = "1";
+        contentRef.current.style.transform = "none";
+      }
+      if (promptRef.current) promptRef.current.style.display = "none";
+      return;
+    }
+
+    // ── Desktop: scroll-driven reveal ──────────────────────────────────
     const overlay = el
       ? (el.querySelector(".tk-hero-overlay") as HTMLElement | null)
       : null;
@@ -451,20 +468,10 @@ function Hero({
       if (!el) return;
       const vh = window.innerHeight;
       const y = window.scrollY || window.pageYOffset || 0;
-
-      // Fade IN with a FIXED-PIXEL dead zone (the iOS address-bar jitter
-      // at load is a constant ~50–100px, not a fraction of the viewport,
-      // so a fixed 120px dead zone reliably clears it), then ramp in.
       const copyIn = Math.max(0, Math.min(1, (y - 120) / 200));
-
-      // Fade OUT only right as the sticky overlay actually un-pins. The
-      // un-pin point = heroHeight − overlayHeight (both svh-based, stable
-      // across address-bar changes), NOT heroHeight − innerHeight, which
-      // fired early on mobile and cut the headline off too soon.
       const overlayH = overlay ? overlay.offsetHeight : vh;
       const unpin = Math.max(1, el.offsetHeight - overlayH);
       const copyOut = Math.max(0, Math.min(1, (y - (unpin - 150)) / 150));
-
       const copyOpacity = copyIn * (1 - copyOut);
       if (contentRef.current) {
         contentRef.current.style.opacity = String(copyOpacity);
