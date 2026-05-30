@@ -1,0 +1,19 @@
+node_modules
+dist
+.DS_Store
+.env
+.env.local
+*.log
+.room-mesh-cache.json
+# User-uploaded + AI-generated runtime artifacts (heavy; regenerate at runtime)
+public/rooms/*.glb
+public/store-assets/
+public/cad/
+# Python sidecars + their venvs
+server/**/.venv/
+server/**/__pycache__/
+server/**/*.pyc
+# Editor + IDE
+.idea/
+.vscode/
+*.swp

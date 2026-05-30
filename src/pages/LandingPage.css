@@ -1,0 +1,286 @@
+/* Landing page — ported from Ariadne design HTML "The Thread v4". The
+   cinematic scroll-driven activation: dark stage → vignette + bloom rises →
+   typewriter input fades in. Scroll progress (0..1) is computed in
+   LandingPage.tsx and applied via the .activated class on .stage. */
+
+.landing {
+  --serif: "EB Garamond", "Cormorant Garamond", Georgia, serif;
+  --sans: "Inter", system-ui, sans-serif;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --ink: #06070d;
+  --ink-soft: #f1ebde;
+  --warm-bot: #ff9450;
+  --warm-mid: #d24a8a;
+  --warm-top: #1c1d3a;
+  --spark: #ffd2a8;
+  --accent: #ff9d6a;
+  --accent-soft: rgba(255, 157, 106, 0.55);
+
+  background: var(--ink);
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+.landing ::selection {
+  background: var(--accent);
+  color: #160a02;
+}
+
+.landing-film {
+  position: relative;
+  /* 2 text beats + activation hold */
+  height: 500vh;
+}
+
+.landing-stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  transition: background 1600ms var(--ease);
+}
+
+.landing-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 90% 70% at 50% 45%,
+    transparent 0%,
+    rgba(0, 0, 0, 0) 35%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+  opacity: 1;
+  transition: opacity 1400ms var(--ease);
+}
+.landing-stage.activated .landing-vignette {
+  opacity: 0;
+}
+
+.landing-bloom {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(8%) scale(0.95);
+  transition: opacity 1500ms var(--ease), transform 1800ms var(--ease);
+  background:
+    radial-gradient(circle at 50% 55%, var(--spark) 0%, rgba(255, 200, 140, 0) 26%),
+    radial-gradient(ellipse 120% 85% at 50% 110%, var(--warm-bot) 0%, rgba(0, 0, 0, 0) 55%),
+    radial-gradient(ellipse 110% 70% at 50% 78%, var(--warm-mid) 0%, rgba(0, 0, 0, 0) 60%),
+    radial-gradient(ellipse 130% 80% at 50% 0%, var(--warm-top) 0%, rgba(0, 0, 0, 0) 70%);
+  mix-blend-mode: screen;
+}
+.landing-stage.activated .landing-bloom {
+  opacity: 1;
+  transform: none;
+}
+
+.landing-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1200px;
+  height: 1200px;
+  margin: -600px 0 0 -600px;
+  background: radial-gradient(circle, var(--spark) 0%, rgba(255, 210, 160, 0) 55%);
+  opacity: 0;
+  transform: scale(0.4);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  transition: opacity 900ms var(--ease), transform 1600ms var(--ease);
+}
+.landing-stage.activated .landing-spark {
+  opacity: 0.85;
+  transform: scale(1);
+}
+
+.landing-beat {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 6vw;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 600ms var(--ease);
+}
+.landing-beat.show {
+  opacity: 1;
+}
+
+.landing-line {
+  max-width: 22ch;
+  text-align: center;
+  font-weight: 400;
+  font-size: clamp(30px, 4.4vw, 60px);
+  line-height: 1.18;
+  letter-spacing: -0.012em;
+  color: rgba(244, 237, 224, 0.94);
+  text-wrap: balance;
+}
+
+/* Activation layer: prompt + textbox */
+.landing-activation {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 1200ms 200ms var(--ease), transform 1400ms 200ms var(--ease);
+}
+.landing-stage.activated .landing-activation {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.landing-activation-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(28px, 4vh, 44px);
+  width: min(720px, 92vw);
+}
+
+.landing-prompt {
+  text-align: center;
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(36px, 5vw, 68px);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  color: #fff5e1;
+  text-shadow: 0 0 18px rgba(255, 200, 140, 0.35), 0 0 42px rgba(255, 170, 110, 0.22);
+  text-wrap: balance;
+}
+
+.landing-typewriter {
+  position: relative;
+  width: 100%;
+  min-height: 1.5em;
+  background: rgba(8, 4, 12, 0.45);
+  border: 1px solid rgba(241, 235, 222, 0.1);
+  border-radius: 999px;
+  padding: 12px 22px;
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  transition: border-color 320ms var(--ease), background 320ms var(--ease);
+}
+.landing-typewriter:focus-within {
+  border-color: color-mix(in srgb, var(--spark) 35%, transparent);
+  background: rgba(8, 4, 12, 0.55);
+}
+.landing-typewriter-input {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(22px, 2.1vw, 30px);
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+  text-align: center;
+  color: #fff7e6;
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  caret-color: var(--accent);
+  height: 1.5em;
+}
+.landing-typewriter-input::placeholder {
+  color: rgba(255, 247, 230, 0.5);
+}
+
+.landing-activation-submit {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14px;
+  color: rgba(255, 247, 230, 0.7);
+  letter-spacing: 0.01em;
+}
+
+.landing-brand {
+  position: absolute;
+  top: clamp(24px, 3.4vh, 42px);
+  left: clamp(28px, 3.8vw, 50px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 5;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 1100ms 1100ms var(--ease), transform 1300ms 1100ms var(--ease);
+}
+.landing-stage.activated .landing-brand {
+  opacity: 1;
+  transform: none;
+}
+
+.landing-brand-mark {
+  width: 30px;
+  height: 30px;
+  color: #fff5e1;
+  filter:
+    drop-shadow(0 0 10px color-mix(in srgb, var(--spark) 45%, transparent))
+    drop-shadow(0 0 28px color-mix(in srgb, var(--accent) 25%, transparent));
+}
+.landing-brand-mark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.landing-brand-name {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 24px;
+  letter-spacing: 0.005em;
+  color: #fff7e6;
+  text-shadow: 0 0 18px rgba(255, 200, 140, 0.3), 0 0 36px rgba(255, 170, 110, 0.18);
+}
+
+.landing-hint {
+  position: fixed;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 22px;
+  opacity: 0;
+  transition: opacity 700ms var(--ease);
+  pointer-events: none;
+  z-index: 4;
+  color: rgba(244, 237, 224, 0.6);
+}
+.landing-hint.show {
+  opacity: 0.5;
+  animation: landing-drift 2.6s ease-in-out infinite;
+}
+@keyframes landing-drift {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(5px);
+  }
+}

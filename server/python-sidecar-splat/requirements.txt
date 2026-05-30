@@ -1,0 +1,8 @@
+# Gaussian Splatting sidecar — Apache 2.0 stack only, fully commercial.
+# Nerfstudio + gsplat + Splatfacto come from the Nerfstudio install
+# (handled in the Dockerfile, not here).
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+numpy>=1.26
+plyfile>=1.0
