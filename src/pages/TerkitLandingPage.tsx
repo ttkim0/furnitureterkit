@@ -100,6 +100,38 @@ export function TerkitLandingPage() {
     const ctx = c.getContext("2d", { alpha: true });
     if (!ctx) return;
 
+    // ── Mobile / touch devices ─────────────────────────────────────
+    // Scrubbing a video via currentTime is janky or outright blocked on
+    // iOS Safari + Android Chrome, and touch-momentum scrolling makes it
+    // worse — which is why phones showed only the dark-green container.
+    // On coarse-pointer devices we instead autoplay + loop the video
+    // directly. The canvas is left untouched (transparent), so the
+    // playing <video> shows straight through it.
+    const isTouch =
+      window.matchMedia("(pointer: coarse)").matches ||
+      ("ontouchstart" in window && window.innerWidth < 1024);
+    if (isTouch) {
+      v.loop = true;
+      v.muted = true;
+      v.setAttribute("playsinline", "");
+      const tryPlay = () => {
+        v.play().catch(() => {});
+      };
+      tryPlay();
+      // iOS sometimes withholds autoplay until a user gesture — retry on
+      // the first touch/scroll/click so the video starts as soon as the
+      // user interacts.
+      const onGesture = () => tryPlay();
+      window.addEventListener("touchstart", onGesture, { once: true, passive: true });
+      window.addEventListener("scroll", onGesture, { once: true, passive: true });
+      window.addEventListener("click", onGesture, { once: true });
+      return () => {
+        window.removeEventListener("touchstart", onGesture);
+        window.removeEventListener("scroll", onGesture);
+        window.removeEventListener("click", onGesture);
+      };
+    }
+
     const targetTime = { current: 0 };
     let lastDrawnTime = -1;
 
