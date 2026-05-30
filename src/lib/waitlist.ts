@@ -12,17 +12,25 @@ export interface WaitlistResult {
   error?: string;
 }
 
-export async function joinWaitlist(email: string): Promise<WaitlistResult> {
-  const trimmed = email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+export async function joinWaitlist(
+  email: string,
+  idea: string
+): Promise<WaitlistResult> {
+  const trimmedEmail = email.trim().toLowerCase();
+  const trimmedIdea = idea.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
     return { ok: false, error: "That email looks off — double-check it." };
+  }
+  if (trimmedIdea.length < 8) {
+    return { ok: false, error: "Tell us a bit more about your idea (at least a sentence)." };
   }
   if (!isConfigured()) {
     return { ok: false, error: "Supabase not configured" };
   }
   const sb = getSupabase();
   const { error } = await sb.from("waitlist").insert({
-    email: trimmed,
+    email: trimmedEmail,
+    idea: trimmedIdea.slice(0, 1000),
     source: "terkit-landing",
     referrer: document.referrer || null,
     user_agent: navigator.userAgent.slice(0, 280),

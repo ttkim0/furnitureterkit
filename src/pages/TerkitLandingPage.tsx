@@ -24,8 +24,9 @@ export function TerkitLandingPage() {
   const headerRef = useRef<HTMLElement>(null);
   const [videoReady, setVideoReady] = useState(false);
 
-  // Email form state
+  // Waitlist form state — both email and a short idea blurb are required.
   const [email, setEmail] = useState("");
+  const [idea, setIdea] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "done" | "error">("idle");
   const [statusMsg, setStatusMsg] = useState<string>("");
 
@@ -86,18 +87,23 @@ export function TerkitLandingPage() {
   // ── Submit handler ──────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim()) return;
+    if (!email.trim() || !idea.trim()) return;
     setStatus("submitting");
     setStatusMsg("");
-    const result = await joinWaitlist(email);
+    const result = await joinWaitlist(email, idea);
     if (!result.ok) {
       setStatus("error");
       setStatusMsg(result.error ?? "Something went wrong.");
       return;
     }
     setStatus("done");
-    setStatusMsg(result.alreadyOnList ? "You're already on the list. We'll be in touch." : "You're in. Look for an email soon.");
+    setStatusMsg(
+      result.alreadyOnList
+        ? "You're already on the list. We'll be in touch."
+        : "You're in. We'll review your idea and reach out soon."
+    );
     setEmail("");
+    setIdea("");
   }
 
   return (
@@ -361,6 +367,16 @@ export function TerkitLandingPage() {
                   disabled={status === "submitting" || status === "done"}
                   className="tk-foot-input"
                 />
+                <textarea
+                  required
+                  rows={3}
+                  maxLength={1000}
+                  placeholder="What do you want to make? (e.g. a walnut bookshelf that holds vinyl records, or a ceramic mug with a thumb rest)"
+                  value={idea}
+                  onChange={(e) => setIdea(e.target.value)}
+                  disabled={status === "submitting" || status === "done"}
+                  className="tk-foot-input tk-foot-textarea"
+                />
                 <button
                   type="submit"
                   className="tk-foot-submit"
@@ -379,31 +395,8 @@ export function TerkitLandingPage() {
               </form>
             </div>
 
-            <div className="tk-foot-bottom">
-              <div className="tk-foot-brand">
-                <strong>TERKIT AI</strong>
-                <span>Turn your idea into a real business.</span>
-              </div>
-              <div className="tk-foot-links">
-                <span className="tk-foot-coltag">COMPANY</span>
-                <a href="#top">Home</a>
-                <a href="/shop">Marketplace</a>
-              </div>
-              <div className="tk-foot-links">
-                <span className="tk-foot-coltag">PRODUCT</span>
-                <a href="/app">Open the editor</a>
-                <a href="#top">How it works</a>
-              </div>
-              <div className="tk-foot-links">
-                <span className="tk-foot-coltag">LEGAL</span>
-                <a href="#top">Privacy</a>
-                <a href="#top">Terms</a>
-              </div>
-            </div>
-
-            <div className="tk-foot-copyright">
-              <span>© {new Date().getFullYear()} TERKIT AI · ALL RIGHTS RESERVED</span>
-              <span>BUILT WITH CARE</span>
+            <div className="tk-foot-copyright tk-foot-copyright-solo">
+              <span>© {new Date().getFullYear()} TERKIT AI</span>
             </div>
           </div>
         </section>

@@ -8274,3 +8274,23 @@ body,
   line-height: 1.55;
   color: var(--tk-muted);
 }
+
+/* Terkit — idea textarea + simplified solo copyright bar */
+.tk-foot-textarea {
+  border-radius: 18px !important;
+  padding: 16px 18px !important;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 84px;
+  line-height: 1.45;
+}
+.tk-foot-textarea::placeholder {
+  font-style: italic;
+}
+.tk-foot-copyright-solo {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--tk-glass-border);
+  justify-content: center;
+  text-align: center;
+}
